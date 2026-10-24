@@ -2,13 +2,25 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="icon" type="image/png" href="./icon-192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#1b1440" />
+    <!-- ホーム画面に追加したとき、アプリのように全画面で開く -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="まくらなげ" />
+    <link rel="apple-touch-icon" href="./icon-192.png" />
     <title>せいれい まくらなげ大会</title>
   </head>
   <body>
     <div id="game"></div>
+    <!-- 縦持ちのときに出す案内 -->
+    <div id="rotate">
+      <div class="phone">📱</div>
+      <p>スマホを よこに してね</p>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

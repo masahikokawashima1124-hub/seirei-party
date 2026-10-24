@@ -15,3 +15,36 @@ html, body {
   width: 100%;
   height: 100%;
 }
+
+#rotate {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: #1b1440;
+  color: #fff;
+  font-family: "Hiragino Maru Gothic ProN", "Hiragino Sans", "Yu Gothic", sans-serif;
+  font-weight: bold;
+  font-size: 26px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+#rotate .phone {
+  font-size: 80px;
+  animation: tilt 1.6s ease-in-out infinite;
+}
+
+@keyframes tilt {
+  0%, 30% { transform: rotate(0deg); }
+  60%, 100% { transform: rotate(-90deg); }
+}
+
+/* スマホ・タブレットを縦に持っているとき */
+@media (orientation: portrait) and (pointer: coarse) {
+  #rotate {
+    display: flex;
+  }
+}

@@ -3,6 +3,14 @@ import { CHARACTERS } from '../characters';
 import { FONT, GAME_HEIGHT, GAME_WIDTH } from '../config';
 import { drawBackground, startFireworks } from '../battle/stage';
 
+// スマホでは全画面にして横向きに固定する（Android で有効。iPhone はホーム画面に追加すると全画面になる）
+function enterFullscreen(scene: Phaser.Scene) {
+  if (!scene.scale.fullscreen.available || scene.scale.isFullscreen) return;
+  scene.scale.startFullscreen();
+  const orientation = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+  orientation.lock?.('landscape').catch(() => {});
+}
+
 export class TitleScene extends Phaser.Scene {
   constructor() {
     super('Title');
@@ -54,7 +62,10 @@ export class TitleScene extends Phaser.Scene {
       .setOrigin(1, 1);
 
     const go = () => this.scene.start('Select');
-    this.input.once('pointerdown', go);
+    this.input.once('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (p.wasTouch) enterFullscreen(this);
+      go();
+    });
     this.input.keyboard?.once('keydown', go);
   }
 }
