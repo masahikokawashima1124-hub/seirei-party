@@ -92,6 +92,8 @@ export class HumanController implements Controller {
   private held: Record<HeldKey, boolean> = { left: false, right: false, down: false, jump: false, throw: false, bump: false };
   private prev: Record<HeldKey, boolean> = { ...this.held };
   private touchHeld: Record<HeldKey, number> = { left: 0, right: 0, down: 0, jump: 0, throw: 0, bump: 0 };
+  // 1フレームより短く押して離しても取りこぼさないよう、「押した」ことを覚えておく
+  private tapped = new Set<HeldKey>();
 
   constructor(scene: Phaser.Scene, slot: PlayerSlot = 'solo', tag?: { text: string; color: number }) {
     this.setupKeyboard(scene, KEYS[slot]);
@@ -105,11 +107,12 @@ export class HumanController implements Controller {
       left: now.left,
       right: now.right,
       down: now.down,
-      jump: now.jump && !this.prev.jump,
-      throw: now.throw && !this.prev.throw,
-      bump: now.bump && !this.prev.bump,
+      jump: (now.jump && !this.prev.jump) || this.tapped.has('jump'),
+      throw: (now.throw && !this.prev.throw) || this.tapped.has('throw'),
+      bump: (now.bump && !this.prev.bump) || this.tapped.has('bump'),
     };
     this.prev = now;
+    this.tapped.clear();
     return input;
   }
 
@@ -119,7 +122,9 @@ export class HumanController implements Controller {
     kb.addCapture('LEFT,RIGHT,UP,DOWN,SPACE');
     const onDown = (e: KeyboardEvent) => {
       const k = map[e.code];
-      if (k) this.held[k] = true;
+      if (!k) return;
+      if (!this.held[k]) this.tapped.add(k);
+      this.held[k] = true;
     };
     const onUp = (e: KeyboardEvent) => {
       const k = map[e.code];
@@ -157,6 +162,7 @@ export class HumanController implements Controller {
         circle.setFillStyle(b.color, pressed.size ? 0.5 : 0.22);
       };
       circle.on('pointerdown', (p: Phaser.Input.Pointer) => {
+        if (!pressed.size) this.tapped.add(b.key);
         pressed.add(p.id);
         update();
       });

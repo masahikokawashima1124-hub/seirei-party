@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import type { CharacterDef } from '../characters';
 import { INVINCIBLE_TIME, MAX_JUMPS, STOCKS, knockback, type HitKind } from './rules';
+import type { FighterSnap } from '../net/protocol';
 
 // 1フレーム分の操作。jump / throw / bump は「押した瞬間」だけ true
 export interface FighterInput {
@@ -37,6 +38,10 @@ export class Fighter {
   out = false; // 場外に出て、戻ってくるのを待っている
   private wasGrounded = false;
   private squash = 0; // 見た目の伸び縮み（+でつぶれる、-で伸びる）
+  // 2台で遊ぶときの子の画面：自分では動かさず、親から届いた様子を映す
+  private remote = false;
+  private remoteGrounded = false;
+  private target: FighterSnap | null = null;
 
   constructor(scene: Phaser.Scene, def: CharacterDef, x: number, y: number, facing: 1 | -1) {
     this.def = def;
@@ -58,6 +63,7 @@ export class Fighter {
   }
 
   get grounded(): boolean {
+    if (this.remote) return this.remoteGrounded;
     return this.arcade.blocked.down || this.arcade.touching.down;
   }
 
@@ -147,9 +153,61 @@ export class Fighter {
     this.stunUntil = now + kb.stun;
     this.bumpUntil = 0;
     this.squash = 0.35;
+    this.flash();
+    return true;
+  }
+
+  // 当たった瞬間に白く光る
+  flash() {
     this.visual.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL);
     this.visual.scene.time.delayedCall(70, () => this.visual.clearTint().setTintMode(Phaser.TintModes.MULTIPLY));
-    return true;
+  }
+
+  // ---- 2台で遊ぶとき ----
+
+  // 親：いまの様子を送る形にする
+  snapshot(now: number): FighterSnap {
+    const r = (n: number) => Math.round(n * 10) / 10;
+    return {
+      x: r(this.body.x),
+      y: r(this.body.y),
+      f: this.facing,
+      d: this.damage,
+      s: this.stocks,
+      o: this.out,
+      st: this.isStunned(now),
+      inv: this.isInvincible(now),
+      g: this.grounded,
+      sq: Math.round(this.squash * 100) / 100,
+    };
+  }
+
+  // 子：物理の計算をやめて、親から届いた様子を映すだけにする
+  makeRemote() {
+    this.remote = true;
+    this.arcade.enable = false;
+  }
+
+  applySnapshot(s: FighterSnap, now: number) {
+    // 場外から戻ったときなど、大きく離れたら一気に動かす
+    if (!this.target || s.o !== this.out || Math.hypot(s.x - this.body.x, s.y - this.body.y) > 240) this.body.setPosition(s.x, s.y);
+    this.target = s;
+    this.facing = s.f;
+    this.damage = s.d;
+    this.stocks = s.s;
+    this.out = s.o;
+    this.stunUntil = s.st ? now + 1000 : 0;
+    this.invincibleUntil = s.inv ? now + 1000 : 0;
+    this.remoteGrounded = s.g;
+    this.squash = s.sq;
+    this.visual.setVisible(!s.o);
+  }
+
+  // 子：毎フレーム、届いた位置へなめらかに近づける
+  remoteUpdate(now: number) {
+    if (!this.target || this.out) return;
+    this.body.setPosition(Phaser.Math.Linear(this.body.x, this.target.x, 0.6), Phaser.Math.Linear(this.body.y, this.target.y, 0.6));
+    this.syncVisual(now);
   }
 
   // 場外に出た

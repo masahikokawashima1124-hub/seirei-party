@@ -2,10 +2,12 @@ import Phaser from 'phaser';
 import { getCharacter } from '../characters';
 import { FONT, GAME_WIDTH } from '../config';
 import { drawBackground, startFireworks } from '../battle/stage';
+import { online } from '../net/online';
+import { listenOnline } from '../net/ui';
 import type { BattleData } from './BattleScene';
 
 interface ResultData extends BattleData {
-  winnerIndex: number; // 0 = 1P（あなた）、1 = 2P（CPU）
+  winnerIndex: number; // 0 = 1P、1 = 2P
 }
 
 export class ResultScene extends Phaser.Scene {
@@ -18,8 +20,10 @@ export class ResultScene extends Phaser.Scene {
     startFireworks(this);
     const def = getCharacter(data.winnerIndex === 0 ? data.p1 : data.p2);
     const versus = data.mode === 'versus';
-    const title = versus ? `${data.winnerIndex === 0 ? '1P' : '2P'}の かち！` : data.winnerIndex === 0 ? 'あなたの かち！' : 'ざんねん…';
-    const happy = versus || data.winnerIndex === 0;
+    const myIndex = data.role === 'guest' ? 1 : 0; // 2だいで の子は 2P
+    const won = data.winnerIndex === myIndex;
+    const title = versus ? `${data.winnerIndex === 0 ? '1P' : '2P'}の かち！` : won ? 'あなたの かち！' : 'ざんねん…';
+    const happy = versus || won;
 
     this.add
       .text(GAME_WIDTH / 2, 90, title, {
@@ -47,8 +51,45 @@ export class ResultScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    if (data.mode === 'online') {
+      this.onlineButtons(data);
+      return;
+    }
     this.button(GAME_WIDTH / 2 - 210, 600, 'もういちど', () => this.scene.start('Battle', { p1: data.p1, p2: data.p2, mode: data.mode }));
     this.button(GAME_WIDTH / 2 + 210, 600, 'キャラえらび', () => this.scene.start('Select', { mode: data.mode }));
+  }
+
+  // 2だいで：ふたりとも「もういちど」を押したら、親がはじめる
+  private onlineButtons(data: ResultData) {
+    let mine = false;
+    let theirs = false;
+    const note = this.add
+      .text(GAME_WIDTH / 2, 530, '', { fontFamily: FONT, fontSize: '26px', fontStyle: 'bold', color: '#ffe066', stroke: '#3a1a5a', strokeThickness: 6 })
+      .setOrigin(0.5);
+    const tryStart = () => {
+      if (!mine || !theirs || data.role !== 'host') return;
+      online.send({ t: 'start', p1: data.p1, p2: data.p2 });
+      this.scene.start('Battle', { p1: data.p1, p2: data.p2, mode: 'online', role: 'host' });
+    };
+    listenOnline(this, (m) => {
+      if (m.t === 'again') {
+        theirs = true;
+        if (!mine) note.setText('あいては「もういちど」を えらんだよ');
+        tryStart();
+      }
+      if (m.t === 'start' && data.role === 'guest') this.scene.start('Battle', { p1: m.p1, p2: m.p2, mode: 'online', role: 'guest' });
+    });
+    if (!online.connected) note.setText('あいてとの つうしんが きれています');
+    this.button(GAME_WIDTH / 2 - 210, 600, 'もういちど', () => {
+      mine = true;
+      online.send({ t: 'again' });
+      note.setText('あいてを まってるよ…');
+      tryStart();
+    });
+    this.button(GAME_WIDTH / 2 + 210, 600, 'おわる', () => {
+      online.leave();
+      this.scene.start('Title');
+    });
   }
 
   private button(x: number, y: number, label: string, onTap: () => void) {

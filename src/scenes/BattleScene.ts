@@ -5,16 +5,25 @@ import { CpuController, HumanController, type Controller } from '../battle/contr
 import { Fighter, NO_INPUT } from '../battle/Fighter';
 import { BUMP_HIT, MAX_JUMPS, PILLOW_HIT, RESPAWN_DELAY, STOCKS, isOutOfBounds } from '../battle/rules';
 import { MAIN, buildPlatforms, drawBackground, startFireworks } from '../battle/stage';
+import { online, type Role } from '../net/online';
+import { RemoteInput, type FxEvent, type PillowSnap, type SnapMsg } from '../net/protocol';
+import { listenOnline } from '../net/ui';
 
-export type BattleMode = 'cpu' | 'versus'; // ひとりで（CPUと）／ふたりで（1台を2人で）
+// ひとりで（CPUと）／ふたりで（1台を2人で）／2だいで（通信）
+export type BattleMode = 'cpu' | 'versus' | 'online';
 
 export interface BattleData {
   p1: string; // キャラクターID
   p2: string;
   mode: BattleMode;
+  role?: Role; // 2だいで のとき。親（host）が1P、子（guest）が2P
 }
 
+const SNAP_INTERVAL = 15; // 親が様子を送る間かく(ms)
+const INPUT_KEEPALIVE = 100; // 子が操作を送る間かく（変わらないとき）
+
 interface Pillow {
+  id: number;
   img: Phaser.Physics.Arcade.Image;
   owner: Fighter;
   scale: number;
@@ -38,6 +47,14 @@ export class BattleScene extends Phaser.Scene {
   private paused = false;
   private pauseLayer?: Phaser.GameObjects.Container;
   private data_!: BattleData;
+  // 2だいで あそぶとき
+  private remoteInput = new RemoteInput();
+  private fxQueue: FxEvent[] = [];
+  private pillowSeq = 0;
+  private lastSent = 0;
+  private sentInput = '';
+  private pressCount = { j: 0, th: 0, b: 0 };
+  private remotePillows = new Map<number, Phaser.GameObjects.Image>();
 
   constructor() {
     super('Battle');
@@ -53,6 +70,30 @@ export class BattleScene extends Phaser.Scene {
     this.finished = false;
     this.paused = false;
     this.pauseLayer = undefined;
+    this.remoteInput = new RemoteInput();
+    this.fxQueue = [];
+    this.pillowSeq = 0;
+    this.lastSent = 0;
+    this.sentInput = '';
+    this.pressCount = { j: 0, th: 0, b: 0 };
+    this.remotePillows = new Map();
+  }
+
+  private get online() {
+    return this.data_.mode === 'online';
+  }
+
+  private get isHost() {
+    return this.online && this.data_.role === 'host';
+  }
+
+  private get isGuest() {
+    return this.online && this.data_.role === 'guest';
+  }
+
+  // この画面で自分が動かすキャラ（0=1P, 1=2P）
+  private get myIndex() {
+    return this.isGuest ? 1 : 0;
   }
 
   create() {
@@ -65,15 +106,33 @@ export class BattleScene extends Phaser.Scene {
     const p2 = new Fighter(this, getCharacter(this.data_.p2), MAIN.x + MAIN.w - 170, MAIN.y - 80, -1);
     this.fighters = [p1, p2];
     const stageArea = { left: MAIN.x, right: MAIN.x + MAIN.w, top: MAIN.y };
-    this.controllers =
-      this.data_.mode === 'versus'
-        ? [
-            new HumanController(this, 'p1', { text: '1P', color: p1.def.color }),
-            new HumanController(this, 'p2', { text: '2P', color: p2.def.color }),
-          ]
-        : [new HumanController(this), new CpuController(p2, p1, stageArea, 0.45)];
+    if (this.data_.mode === 'versus') {
+      this.controllers = [
+        new HumanController(this, 'p1', { text: '1P', color: p1.def.color }),
+        new HumanController(this, 'p2', { text: '2P', color: p2.def.color }),
+      ];
+    } else if (this.isHost) {
+      // 2Pは、子の画面から届いた操作で動く
+      this.controllers = [new HumanController(this), { read: () => this.remoteInput.read() }];
+    } else if (this.isGuest) {
+      // 子は自分の操作を送るだけ。キャラは親から届いた様子のとおりに映す
+      this.controllers = [new HumanController(this)];
+      this.fighters.forEach((f) => f.makeRemote());
+    } else {
+      this.controllers = [new HumanController(this), new CpuController(p2, p1, stageArea, 0.45)];
+    }
+    if (this.online) {
+      listenOnline(this, (m) => {
+        if (m.t === 'in' && this.isHost) this.remoteInput.receive(m);
+        if (m.t === 'snap' && this.isGuest) this.applySnap(m);
+      });
+      // 「やめる」などで勝負の途中に場面を出るときは、つながりも切る
+      this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+        if (!this.finished) online.leave();
+      });
+    }
 
-    for (const f of this.fighters) {
+    for (const f of this.isGuest ? [] : this.fighters) {
       this.physics.add.collider(f.body, solid);
       // すり抜け床：上から落ちてきたときだけ乗れる
       this.physics.add.collider(f.body, oneWay, undefined, (_a, plat) => {
@@ -88,7 +147,10 @@ export class BattleScene extends Phaser.Scene {
     this.createPauseButton();
     this.countdown();
 
-    const onBlur = () => this.setPaused(true);
+    // 2だいで のときは、片方だけ止めるわけにいかないので止めない
+    const onBlur = () => {
+      if (!this.online) this.setPaused(true);
+    };
     this.game.events.on(Phaser.Core.Events.BLUR, onBlur);
     this.game.events.on(Phaser.Core.Events.HIDDEN, onBlur);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -98,7 +160,11 @@ export class BattleScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
-    if (this.paused) return;
+    if (this.paused && !this.online) return;
+    if (this.isGuest) {
+      this.guestUpdate(time);
+      return;
+    }
     this.fighters.forEach((f, i) => {
       const input = this.started && !this.finished ? this.controllers[i].read(time) : NO_INPUT;
       const { threw } = f.update(input, time, delta);
@@ -109,6 +175,94 @@ export class BattleScene extends Phaser.Scene {
     this.updatePillows(time);
     if (!this.finished) this.checkOutOfBounds(time);
     this.updateHud();
+    if (this.isHost && time - this.lastSent >= SNAP_INTERVAL) this.sendSnap(time);
+  }
+
+  // ---- 2だいで あそぶとき ----
+
+  // 親：キャラ・まくら・演出をまとめて子へ送る
+  private sendSnap(now: number) {
+    this.lastSent = now;
+    const msg: SnapMsg = {
+      t: 'snap',
+      f: this.fighters.map((f) => f.snapshot(now)),
+      p: this.pillows.map((p) => ({
+        id: p.id,
+        x: Math.round(p.img.x),
+        y: Math.round(p.img.y),
+        r: Math.round(p.img.rotation * 100) / 100,
+        sc: p.scale,
+      })),
+      e: this.fxQueue,
+    };
+    this.fxQueue = [];
+    online.send(msg);
+  }
+
+  // 子：自分の操作を親へ送り、届いた様子を映す
+  private guestUpdate(time: number) {
+    const input = this.started && !this.finished ? this.controllers[0].read(time) : NO_INPUT;
+    if (input.jump) this.pressCount.j++;
+    if (input.throw) this.pressCount.th++;
+    if (input.bump) this.pressCount.b++;
+    const msg = { t: 'in' as const, l: input.left, r: input.right, d: input.down, ...this.pressCount };
+    const key = JSON.stringify(msg);
+    if (key !== this.sentInput || time - this.lastSent >= INPUT_KEEPALIVE) {
+      this.sentInput = key;
+      this.lastSent = time;
+      online.send(msg);
+    }
+    this.fighters.forEach((f) => f.remoteUpdate(time));
+    for (const img of this.remotePillows.values()) {
+      const to = img.getData('to') as PillowSnap;
+      img.setPosition(Phaser.Math.Linear(img.x, to.x, 0.6), Phaser.Math.Linear(img.y, to.y, 0.6));
+      img.setRotation(to.r);
+    }
+    this.updateHud();
+  }
+
+  private applySnap(m: SnapMsg) {
+    const now = this.time.now;
+    m.f.forEach((s, i) => this.fighters[i]?.applySnapshot(s, now));
+    const alive = new Set<number>();
+    for (const p of m.p) {
+      alive.add(p.id);
+      let img = this.remotePillows.get(p.id);
+      if (!img) {
+        img = this.add.image(p.x, p.y, 'pillow').setScale(p.sc * 0.9).setDepth(5);
+        this.remotePillows.set(p.id, img);
+      }
+      img.setData('to', p);
+    }
+    for (const [id, img] of this.remotePillows) {
+      if (alive.has(id)) continue;
+      img.destroy();
+      this.remotePillows.delete(id);
+    }
+    for (const e of m.e) this.fx(e);
+  }
+
+  // 演出を出す。親のときは子にも同じ演出を送る
+  private fx(e: FxEvent) {
+    if (this.isHost) this.fxQueue.push(e);
+    switch (e.t) {
+      case 'hit':
+        if (this.isGuest) this.fighters[e.i].flash();
+        this.hitEffect(e.x, e.y, e.w, this.fighters[e.i]);
+        break;
+      case 'poof':
+        this.feathers(e.x, e.y);
+        break;
+      case 'ko':
+        this.knockOutEffect(e.x, e.y);
+        break;
+      case 'ledge':
+        this.ledgeText(e.x, e.y);
+        break;
+      case 'finish':
+        this.showFinish(e.winner);
+        break;
+    }
   }
 
   // ---- まくら ----
@@ -131,7 +285,7 @@ export class BattleScene extends Phaser.Scene {
     body.setGravityY(-1350); // ゆっくり弧をえがく
     body.setVelocity(f.facing * (640 - (scale - 1) * 300), -170);
     body.setAngularVelocity(f.facing * 540);
-    this.pillows.push({ img, owner: f, scale, bornAt: now });
+    this.pillows.push({ id: ++this.pillowSeq, img, owner: f, scale, bornAt: now });
   }
 
   private updatePillows(now: number) {
@@ -146,7 +300,9 @@ export class BattleScene extends Phaser.Scene {
         if (f === p.owner || f.out) continue;
         if (Phaser.Geom.Intersects.RectangleToRectangle(img.getBounds(), f.body.getBounds())) {
           const dir: 1 | -1 = (img.body as Phaser.Physics.Arcade.Body).velocity.x >= 0 ? 1 : -1;
-          if (f.receiveHit(PILLOW_HIT, dir, now, p.scale)) this.hitEffect(img.x, img.y, 'ぽふっ', f);
+          if (f.receiveHit(PILLOW_HIT, dir, now, p.scale)) {
+            this.fx({ t: 'hit', x: Math.round(img.x), y: Math.round(img.y), w: 'ぽふっ', i: this.fighters.indexOf(f) });
+          }
           this.removePillow(p, true);
           break;
         }
@@ -168,7 +324,7 @@ export class BattleScene extends Phaser.Scene {
   }
 
   private removePillow(p: Pillow, poof: boolean) {
-    if (poof) this.feathers(p.img.x, p.img.y);
+    if (poof) this.fx({ t: 'poof', x: Math.round(p.img.x), y: Math.round(p.img.y) });
     p.img.destroy();
     this.pillows = this.pillows.filter((x) => x !== p);
   }
@@ -185,7 +341,8 @@ export class BattleScene extends Phaser.Scene {
       if (Phaser.Geom.Intersects.RectangleToRectangle(atk.body.getBounds(), def.body.getBounds())) {
         atk.bumpHitDone = true;
         if (def.receiveHit(BUMP_HIT, atk.facing, now)) {
-          this.hitEffect((atk.body.x + def.body.x) / 2, def.body.y, 'ぽよん！', def);
+          const x = Math.round((atk.body.x + def.body.x) / 2);
+          this.fx({ t: 'hit', x, y: Math.round(def.body.y), w: 'ぽよん！', i: this.fighters.indexOf(def) });
           atk.arcade.velocity.x *= -0.3; // はね返る
         }
       }
@@ -210,13 +367,17 @@ export class BattleScene extends Phaser.Scene {
       f.arcade.reset(x, y);
       f.arcade.setVelocity(0, -260);
       f.jumpsLeft = MAX_JUMPS - 1;
-      const t = this.add
-        .text(x, y - 70, 'よいしょ', { fontFamily: FONT, fontSize: '26px', fontStyle: 'bold', color: '#ffffff', stroke: '#3a1a5a', strokeThickness: 6 })
-        .setOrigin(0.5)
-        .setDepth(30);
-      this.tweens.add({ targets: t, y: y - 110, alpha: 0, duration: 700, onComplete: () => t.destroy() });
+      this.fx({ t: 'ledge', x: Math.round(x), y: Math.round(y) });
       return;
     }
+  }
+
+  private ledgeText(x: number, y: number) {
+    const t = this.add
+      .text(x, y - 70, 'よいしょ', { fontFamily: FONT, fontSize: '26px', fontStyle: 'bold', color: '#ffffff', stroke: '#3a1a5a', strokeThickness: 6 })
+      .setOrigin(0.5)
+      .setDepth(30);
+    this.tweens.add({ targets: t, y: y - 110, alpha: 0, duration: 700, onComplete: () => t.destroy() });
   }
 
   // ---- 場外 ----
@@ -224,7 +385,7 @@ export class BattleScene extends Phaser.Scene {
   private checkOutOfBounds(now: number) {
     for (const f of this.fighters) {
       if (f.out || !isOutOfBounds(f.body.x, f.body.y, GAME_WIDTH, GAME_HEIGHT)) continue;
-      this.knockOutEffect(f.body.x, f.body.y);
+      this.fx({ t: 'ko', x: Math.round(f.body.x), y: Math.round(f.body.y) });
       f.knockOut();
       if (f.stocks <= 0) {
         this.finish(now);
@@ -238,10 +399,15 @@ export class BattleScene extends Phaser.Scene {
 
   private finish(_now: number) {
     if (this.finished) return;
-    this.finished = true;
     const winner = this.fighters.find((f) => f.stocks > 0) ?? this.fighters[0];
-    const winnerIndex = this.fighters.indexOf(winner);
+    this.fx({ t: 'finish', winner: this.fighters.indexOf(winner) });
+  }
+
+  private showFinish(winnerIndex: number) {
+    if (this.finished) return;
+    this.finished = true;
     this.bigText('おしまい！', '#ffffff');
+    if (this.isHost) this.sendSnap(this.time.now); // 子にも すぐ知らせる
     this.time.delayedCall(1600, () => this.scene.start('Result', { ...this.data_, winnerIndex }));
   }
 
@@ -365,6 +531,7 @@ export class BattleScene extends Phaser.Scene {
 
   private playerLabel(i: number) {
     if (this.data_.mode === 'versus') return i === 0 ? '1P' : '2P';
+    if (this.online) return i === this.myIndex ? 'あなた' : 'あいて';
     return i === 0 ? 'あなた' : 'CPU';
   }
 
@@ -397,19 +564,27 @@ export class BattleScene extends Phaser.Scene {
   private setPaused(paused: boolean) {
     if (this.finished || paused === this.paused) return;
     this.paused = paused;
+    // 2だいで のときは、ゲームは止めずに「やめる」を選べるだけにする
+    const freeze = !this.online;
     if (paused) {
-      this.physics.pause();
-      this.tweens.pauseAll();
-      this.time.paused = true;
+      if (freeze) {
+        this.physics.pause();
+        this.tweens.pauseAll();
+        this.time.paused = true;
+      }
       const bg = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.6).setInteractive();
-      const title = this.add.text(GAME_WIDTH / 2, 230, 'ひとやすみ', { fontFamily: FONT, fontSize: '72px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
+      const title = this.add.text(GAME_WIDTH / 2, 230, freeze ? 'ひとやすみ' : 'やめる？', { fontFamily: FONT, fontSize: '72px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
       const resume = this.menuButton(GAME_WIDTH / 2, 380, 'つづける', () => this.setPaused(false));
-      const back = this.menuButton(GAME_WIDTH / 2, 490, 'キャラえらびへ', () => this.scene.start('Select', { mode: this.data_.mode }));
+      const back = freeze
+        ? this.menuButton(GAME_WIDTH / 2, 490, 'キャラえらびへ', () => this.scene.start('Select', { mode: this.data_.mode }))
+        : this.menuButton(GAME_WIDTH / 2, 490, 'やめる', () => this.scene.start('Title'));
       this.pauseLayer = this.add.container(0, 0, [bg, title, ...resume, ...back]).setDepth(100);
     } else {
-      this.physics.resume();
-      this.tweens.resumeAll();
-      this.time.paused = false;
+      if (freeze) {
+        this.physics.resume();
+        this.tweens.resumeAll();
+        this.time.paused = false;
+      }
       this.pauseLayer?.destroy();
       this.pauseLayer = undefined;
     }

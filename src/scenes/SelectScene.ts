@@ -4,7 +4,8 @@ import { FONT, GAME_WIDTH } from '../config';
 import { drawBackground } from '../battle/stage';
 import type { BattleMode } from './BattleScene';
 
-// キャラえらび：はじめに「ひとりで／ふたりで」を選び、つぎに 1P、さいごに相手（CPU か 2P）
+// キャラえらび：はじめに「ひとりで／ふたりで／2だいで」を選び、つぎに 1P、さいごに相手（CPU か 2P）。
+// 2だいで のときは自分のキャラだけ選んで、へやばんごうの画面へ
 export class SelectScene extends Phaser.Scene {
   private mode: BattleMode | null = null;
   private p1: string | null = null;
@@ -36,9 +37,9 @@ export class SelectScene extends Phaser.Scene {
 
   private createModeChoice() {
     const make = (x: number, title: string, sub: string, mode: BattleMode, color: number) => {
-      const r = this.add.rectangle(x, 360, 440, 300, 0xffffff, 0.94).setStrokeStyle(8, color).setInteractive();
-      const t = this.add.text(x, 320, title, { fontFamily: FONT, fontSize: '54px', fontStyle: 'bold', color: '#3a1a5a' }).setOrigin(0.5);
-      const s = this.add.text(x, 410, sub, { fontFamily: FONT, fontSize: '24px', color: '#6a4a8a', align: 'center' }).setOrigin(0.5);
+      const r = this.add.rectangle(x, 360, 370, 300, 0xffffff, 0.94).setStrokeStyle(8, color).setInteractive();
+      const t = this.add.text(x, 320, title, { fontFamily: FONT, fontSize: '50px', fontStyle: 'bold', color: '#3a1a5a' }).setOrigin(0.5);
+      const s = this.add.text(x, 410, sub, { fontFamily: FONT, fontSize: '22px', color: '#6a4a8a', align: 'center' }).setOrigin(0.5);
       r.on('pointerdown', () => {
         this.mode = mode;
         this.refresh();
@@ -46,8 +47,9 @@ export class SelectScene extends Phaser.Scene {
       return [r, t, s];
     };
     this.modeLayer = this.add.container(0, 0, [
-      ...make(GAME_WIDTH / 2 - 250, 'ひとりで', 'コンピュータと\nたいせん', 'cpu', 0x7cd4ff),
-      ...make(GAME_WIDTH / 2 + 250, 'ふたりで', '1だいを 2人で もって\nたいせん', 'versus', 0xffa0c8),
+      ...make(GAME_WIDTH / 2 - 400, 'ひとりで', 'コンピュータと\nたいせん', 'cpu', 0x7cd4ff),
+      ...make(GAME_WIDTH / 2, 'ふたりで', '1だいを 2人で もって\nたいせん', 'versus', 0xffa0c8),
+      ...make(GAME_WIDTH / 2 + 400, '2だいで', 'スマホ2だいを\nつないで たいせん', 'online', 0x9be37a),
     ]);
   }
 
@@ -91,6 +93,11 @@ export class SelectScene extends Phaser.Scene {
 
   private pick(id: string) {
     if (!this.mode) return;
+    if (this.mode === 'online') {
+      this.cards.forEach((c) => c.frame.disableInteractive());
+      this.time.delayedCall(250, () => this.scene.start('Lobby', { char: id }));
+      return;
+    }
     if (!this.p1) {
       this.p1 = id;
       this.refresh();
@@ -109,7 +116,8 @@ export class SelectScene extends Phaser.Scene {
       return;
     }
     const versus = this.mode === 'versus';
-    if (!this.p1) this.heading.setText(versus ? '1Pの キャラを えらんでね' : 'じぶんの キャラを えらんでね');
+    if (this.mode === 'online') this.heading.setText('じぶんの キャラを えらんでね');
+    else if (!this.p1) this.heading.setText(versus ? '1Pの キャラを えらんでね' : 'じぶんの キャラを えらんでね');
     else this.heading.setText(versus ? '2Pの キャラを えらんでね' : 'あいてを えらんでね');
     for (const c of this.cards) {
       const mine = c.def.id === this.p1;

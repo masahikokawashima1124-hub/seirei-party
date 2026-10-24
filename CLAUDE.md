@@ -17,7 +17,12 @@
 - `src/battle/rules.ts` … ふっとびの計算、ふうせんの数など（テストあり `npm test`）
 - `src/battle/Fighter.ts` … キャラの動き（移動・3段ジャンプ・まくら・ぽよん・伸び縮みの見た目）
 - `src/battle/controllers.ts` … 人の操作（キーボード＋画面ボタン）とコンピュータ。ボタン配置は `touchLayout()`（solo／p1／p2）
-- 遊び方は2つ：`cpu`（ひとりで）と `versus`（1台を2人で。画面の左半分が1P、右半分が2P）。キャラえらびの最初に選ぶ
+- 遊び方は3つ：`cpu`（ひとりで）、`versus`（1台を2人で。画面の左半分が1P、右半分が2P）、`online`（2だいで。通信）。キャラえらびの最初に選ぶ
+- `src/net/` … 2だいで遊ぶしくみ。PeerJS の無料の取り次ぎサーバー（0.peerjs.com、登録不要）で相手を見つけ、あとは2台が WebRTC で直接やりとりする。へやばんごう（4けた）→ peer ID `seirei-party-v1-<番号>`
+  - 親（へやを つくった人＝1P）がゲームを全部計算し、様子（キャラ・まくら・演出）を約60回/秒で子へ送る。子（2P）は操作を送って、届いた様子を映すだけ（`Fighter.makeRemote`）
+  - 送るデータの形は `protocol.ts`。形を変えたら `PROTOCOL_VERSION` と ID の `v1` を上げる（古い版どうしが混ざらないように）
+  - 画面は `LobbyScene`（へやを つくる／はいる）。切れたら `showLost`（8秒なにも来なければ切れたとみなす）
+  - 弱点：中継（TURN）サーバーが無いので、ちがう回線どうし（スマホの電波と家のWi-Fiなど）だと、つながらないことがある。同じWi-Fiなら ほぼ つながる
 - `src/battle/stage.ts` … ステージ「なつまつり」の足場と背景
 - `src/scenes/` … Boot → Title → Select → Battle → Result
 

@@ -5,6 +5,7 @@ import { GRAVITY } from './battle/rules';
 import { BootScene } from './scenes/BootScene';
 import { TitleScene } from './scenes/TitleScene';
 import { SelectScene } from './scenes/SelectScene';
+import { LobbyScene } from './scenes/LobbyScene';
 import { BattleScene } from './scenes/BattleScene';
 import { ResultScene } from './scenes/ResultScene';
 
@@ -23,7 +24,7 @@ const game = new Phaser.Game({
     default: 'arcade',
     arcade: { gravity: { x: 0, y: GRAVITY }, debug: false },
   },
-  scene: [BootScene, TitleScene, SelectScene, BattleScene, ResultScene],
+  scene: [BootScene, TitleScene, SelectScene, LobbyScene, BattleScene, ResultScene],
 });
 
 // 開発中だけ、ブラウザのコンソールからゲームを調べられるようにする
