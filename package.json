@@ -1,0 +1,26 @@
+{
+  "name": "seirei-party",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "deploy": "npm test && npm run build && gh-pages -d dist --dotfiles",
+    "sprites": "node scripts/extract-sprites.mjs"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "gh-pages": "^6.3.0",
+    "sharp": "^0.35.5",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.3",
+    "phaser": "^4.2.1"
+  }
+}
