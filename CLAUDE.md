@@ -28,7 +28,7 @@
 
 ## コマンド
 - `npm run dev` / `npm run build` / `npm test`
-- `npm run deploy` … GitHub Pages へ公開（リポジトリ作成と公開はユーザーの確認後）
+- `npm run deploy` … GitHub Pages へ公開。**公開中** https://masahikokawashima1124-hub.github.io/seirei-party/ （リポジトリ masahikokawashima1124-hub/seirei-party、公開設定）
 
 ## 動作確認のコツ
 - アプリ内ブラウザが隠れていると描画が止まる。開発中は `window.game` があるので、`game.step(now, 16)` で進めるか、Edge を裏で動かす playwright-core で撮影する。
