@@ -16,7 +16,8 @@
 - `src/characters.ts` … 出場キャラと性能（速さ・ジャンプ・重さ・まくらの大きさ）
 - `src/battle/rules.ts` … ふっとびの計算、ふうせんの数など（テストあり `npm test`）
 - `src/battle/Fighter.ts` … キャラの動き（移動・3段ジャンプ・まくら・ぽよん・伸び縮みの見た目）
-- `src/battle/controllers.ts` … 人の操作（キーボード＋画面ボタン）とコンピュータ
+- `src/battle/controllers.ts` … 人の操作（キーボード＋画面ボタン）とコンピュータ。ボタン配置は `touchLayout()`（solo／p1／p2）
+- 遊び方は2つ：`cpu`（ひとりで）と `versus`（1台を2人で。画面の左半分が1P、右半分が2P）。キャラえらびの最初に選ぶ
 - `src/battle/stage.ts` … ステージ「なつまつり」の足場と背景
 - `src/scenes/` … Boot → Title → Select → Battle → Result
 

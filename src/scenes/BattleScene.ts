@@ -6,9 +6,12 @@ import { Fighter, NO_INPUT } from '../battle/Fighter';
 import { BUMP_HIT, MAX_JUMPS, PILLOW_HIT, RESPAWN_DELAY, STOCKS, isOutOfBounds } from '../battle/rules';
 import { MAIN, buildPlatforms, drawBackground, startFireworks } from '../battle/stage';
 
+export type BattleMode = 'cpu' | 'versus'; // ひとりで（CPUと）／ふたりで（1台を2人で）
+
 export interface BattleData {
   p1: string; // キャラクターID
   p2: string;
+  mode: BattleMode;
 }
 
 interface Pillow {
@@ -62,7 +65,13 @@ export class BattleScene extends Phaser.Scene {
     const p2 = new Fighter(this, getCharacter(this.data_.p2), MAIN.x + MAIN.w - 170, MAIN.y - 80, -1);
     this.fighters = [p1, p2];
     const stageArea = { left: MAIN.x, right: MAIN.x + MAIN.w, top: MAIN.y };
-    this.controllers = [new HumanController(this), new CpuController(p2, p1, stageArea, 0.45)];
+    this.controllers =
+      this.data_.mode === 'versus'
+        ? [
+            new HumanController(this, 'p1', { text: '1P', color: p1.def.color }),
+            new HumanController(this, 'p2', { text: '2P', color: p2.def.color }),
+          ]
+        : [new HumanController(this), new CpuController(p2, p1, stageArea, 0.45)];
 
     for (const f of this.fighters) {
       this.physics.add.collider(f.body, solid);
@@ -231,11 +240,9 @@ export class BattleScene extends Phaser.Scene {
     if (this.finished) return;
     this.finished = true;
     const winner = this.fighters.find((f) => f.stocks > 0) ?? this.fighters[0];
-    const isP1 = winner === this.fighters[0];
+    const winnerIndex = this.fighters.indexOf(winner);
     this.bigText('おしまい！', '#ffffff');
-    this.time.delayedCall(1600, () =>
-      this.scene.start('Result', { winner: winner.def.id, playerWon: isP1, p1: this.data_.p1, p2: this.data_.p2 }),
-    );
+    this.time.delayedCall(1600, () => this.scene.start('Result', { ...this.data_, winnerIndex }));
   }
 
   // ---- 演出 ----
@@ -335,7 +342,7 @@ export class BattleScene extends Phaser.Scene {
       const face = this.add.image(right ? px + 250 : px + 50, 66, f.def.id).setDepth(46);
       face.setScale(80 / face.height);
       this.add
-        .text(right ? x - 90 : x + 96, 26, `${i === 0 ? 'あなた' : 'CPU'}　${f.def.name}`, {
+        .text(right ? x - 90 : x + 96, 26, `${this.playerLabel(i)}　${f.def.name}`, {
           fontFamily: FONT,
           fontSize: '18px',
           fontStyle: 'bold',
@@ -354,6 +361,11 @@ export class BattleScene extends Phaser.Scene {
       }
       this.huds.push({ pct, balloons });
     });
+  }
+
+  private playerLabel(i: number) {
+    if (this.data_.mode === 'versus') return i === 0 ? '1P' : '2P';
+    return i === 0 ? 'あなた' : 'CPU';
   }
 
   private updateHud() {
@@ -392,7 +404,7 @@ export class BattleScene extends Phaser.Scene {
       const bg = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.6).setInteractive();
       const title = this.add.text(GAME_WIDTH / 2, 230, 'ひとやすみ', { fontFamily: FONT, fontSize: '72px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
       const resume = this.menuButton(GAME_WIDTH / 2, 380, 'つづける', () => this.setPaused(false));
-      const back = this.menuButton(GAME_WIDTH / 2, 490, 'キャラえらびへ', () => this.scene.start('Select'));
+      const back = this.menuButton(GAME_WIDTH / 2, 490, 'キャラえらびへ', () => this.scene.start('Select', { mode: this.data_.mode }));
       this.pauseLayer = this.add.container(0, 0, [bg, title, ...resume, ...back]).setDepth(100);
     } else {
       this.physics.resume();

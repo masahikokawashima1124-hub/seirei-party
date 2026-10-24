@@ -2,12 +2,10 @@ import Phaser from 'phaser';
 import { getCharacter } from '../characters';
 import { FONT, GAME_WIDTH } from '../config';
 import { drawBackground, startFireworks } from '../battle/stage';
+import type { BattleData } from './BattleScene';
 
-interface ResultData {
-  winner: string;
-  playerWon: boolean;
-  p1: string;
-  p2: string;
+interface ResultData extends BattleData {
+  winnerIndex: number; // 0 = 1P（あなた）、1 = 2P（CPU）
 }
 
 export class ResultScene extends Phaser.Scene {
@@ -18,14 +16,17 @@ export class ResultScene extends Phaser.Scene {
   create(data: ResultData) {
     drawBackground(this);
     startFireworks(this);
-    const def = getCharacter(data.winner);
+    const def = getCharacter(data.winnerIndex === 0 ? data.p1 : data.p2);
+    const versus = data.mode === 'versus';
+    const title = versus ? `${data.winnerIndex === 0 ? '1P' : '2P'}の かち！` : data.winnerIndex === 0 ? 'あなたの かち！' : 'ざんねん…';
+    const happy = versus || data.winnerIndex === 0;
 
     this.add
-      .text(GAME_WIDTH / 2, 90, data.playerWon ? 'あなたの かち！' : 'ざんねん…', {
+      .text(GAME_WIDTH / 2, 90, title, {
         fontFamily: FONT,
         fontSize: '80px',
         fontStyle: 'bold',
-        color: data.playerWon ? '#ffe066' : '#ffffff',
+        color: happy ? '#ffe066' : '#ffffff',
         stroke: '#5a2d82',
         strokeThickness: 14,
       })
@@ -46,8 +47,8 @@ export class ResultScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    this.button(GAME_WIDTH / 2 - 210, 600, 'もういちど', () => this.scene.start('Battle', { p1: data.p1, p2: data.p2 }));
-    this.button(GAME_WIDTH / 2 + 210, 600, 'キャラえらび', () => this.scene.start('Select'));
+    this.button(GAME_WIDTH / 2 - 210, 600, 'もういちど', () => this.scene.start('Battle', { p1: data.p1, p2: data.p2, mode: data.mode }));
+    this.button(GAME_WIDTH / 2 + 210, 600, 'キャラえらび', () => this.scene.start('Select', { mode: data.mode }));
   }
 
   private button(x: number, y: number, label: string, onTap: () => void) {

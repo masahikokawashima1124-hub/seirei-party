@@ -54,10 +54,11 @@ export class TitleScene extends Phaser.Scene {
     this.tweens.add({ targets: start, alpha: 0.3, duration: 700, yoyo: true, repeat: -1 });
 
     this.add
-      .text(GAME_WIDTH - 16, GAME_HEIGHT - 12, 'PC：A D いどう / W ジャンプ / J まくら / K ぽよん / S おりる', {
+      .text(GAME_WIDTH - 16, GAME_HEIGHT - 12, 'PC ひとり：A D いどう / W ジャンプ / J まくら / K ぽよん / S おりる\nPC ふたり：1P＝A D W・F まくら・G ぽよん　2P＝← → ↑・. まくら・/ ぽよん', {
         fontFamily: FONT,
         fontSize: '18px',
         color: '#d8c8ff',
+        align: 'right',
       })
       .setOrigin(1, 1);
 

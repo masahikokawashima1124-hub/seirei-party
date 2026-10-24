@@ -6,7 +6,86 @@ export interface Controller {
   read(now: number): FighterInput;
 }
 
-type HeldKey = 'left' | 'right' | 'down' | 'jump' | 'throw' | 'bump';
+export type HeldKey = 'left' | 'right' | 'down' | 'jump' | 'throw' | 'bump';
+export type PlayerSlot = 'solo' | 'p1' | 'p2';
+
+interface ButtonDef {
+  key: HeldKey;
+  x: number;
+  y: number;
+  r: number;
+  label: string;
+  color: number;
+}
+
+const W = GAME_WIDTH;
+const H = GAME_HEIGHT;
+
+// キーボードの割り当て。ひとりのときは、どちらのキーでも動かせる
+const KEYS: Record<PlayerSlot, Record<string, HeldKey>> = {
+  solo: {
+    KeyA: 'left',
+    ArrowLeft: 'left',
+    KeyD: 'right',
+    ArrowRight: 'right',
+    KeyS: 'down',
+    ArrowDown: 'down',
+    KeyW: 'jump',
+    ArrowUp: 'jump',
+    Space: 'jump',
+    KeyJ: 'throw',
+    KeyZ: 'throw',
+    KeyF: 'throw',
+    KeyK: 'bump',
+    KeyX: 'bump',
+    KeyG: 'bump',
+  },
+  p1: { KeyA: 'left', KeyD: 'right', KeyS: 'down', KeyW: 'jump', KeyF: 'throw', KeyG: 'bump' },
+  p2: {
+    ArrowLeft: 'left',
+    ArrowRight: 'right',
+    ArrowDown: 'down',
+    ArrowUp: 'jump',
+    Period: 'throw',
+    Slash: 'bump',
+    Numpad1: 'throw',
+    Numpad2: 'bump',
+  },
+};
+
+// 画面のボタンの並び
+function touchLayout(slot: PlayerSlot): ButtonDef[] {
+  if (slot === 'solo') {
+    // 左手：移動、右手：ジャンプ・まくら・ぽよん
+    return [
+      { key: 'left', x: 95, y: H - 105, r: 66, label: '◀', color: 0xffffff },
+      { key: 'right', x: 255, y: H - 105, r: 66, label: '▶', color: 0xffffff },
+      { key: 'down', x: 175, y: H - 225, r: 44, label: '▼', color: 0xffffff },
+      { key: 'jump', x: W - 100, y: H - 110, r: 74, label: 'ジャンプ', color: 0x7cd4ff },
+      { key: 'throw', x: W - 255, y: H - 85, r: 60, label: 'まくら', color: 0xffe08a },
+      { key: 'bump', x: W - 190, y: H - 240, r: 56, label: 'ぽよん', color: 0xffa0c8 },
+    ];
+  }
+  // ふたりのとき：画面の左半分が1P、右半分が2P。外側に移動、内側にジャンプ・まくら・ぽよん。
+  // 内側のボタンはステージの床より下に横一列で並べ、キャラが隠れないようにする
+  const y = H - 62;
+  const left: ButtonDef[] = [
+    { key: 'left', x: 62, y, r: 50, label: '◀', color: 0xffffff },
+    { key: 'right', x: 178, y, r: 50, label: '▶', color: 0xffffff },
+    { key: 'down', x: 120, y: H - 165, r: 36, label: '▼', color: 0xffffff },
+    { key: 'throw', x: 358, y, r: 46, label: 'まくら', color: 0xffe08a },
+    { key: 'bump', x: 458, y, r: 46, label: 'ぽよん', color: 0xffa0c8 },
+    { key: 'jump', x: 566, y, r: 52, label: 'ジャンプ', color: 0x7cd4ff },
+  ];
+  if (slot === 'p1') return left;
+  // 2P は左右を反転。ただし ◀ ▶ の向きはそのまま
+  return left.map((b) => {
+    const mirrored = { ...b, x: W - b.x };
+    if (b.key === 'left') return { ...mirrored, key: 'right' as const, label: '▶' };
+    if (b.key === 'right') return { ...mirrored, key: 'left' as const, label: '◀' };
+    return mirrored;
+  });
+}
 
 // 人が操作する：キーボード＋画面のボタン
 export class HumanController implements Controller {
@@ -14,9 +93,9 @@ export class HumanController implements Controller {
   private prev: Record<HeldKey, boolean> = { ...this.held };
   private touchHeld: Record<HeldKey, number> = { left: 0, right: 0, down: 0, jump: 0, throw: 0, bump: 0 };
 
-  constructor(scene: Phaser.Scene) {
-    this.setupKeyboard(scene);
-    this.setupTouch(scene);
+  constructor(scene: Phaser.Scene, slot: PlayerSlot = 'solo', tag?: { text: string; color: number }) {
+    this.setupKeyboard(scene, KEYS[slot]);
+    this.setupTouch(scene, touchLayout(slot), tag);
   }
 
   read(): FighterInput {
@@ -34,24 +113,9 @@ export class HumanController implements Controller {
     return input;
   }
 
-  private setupKeyboard(scene: Phaser.Scene) {
+  private setupKeyboard(scene: Phaser.Scene, map: Record<string, HeldKey>) {
     const kb = scene.input.keyboard;
     if (!kb) return;
-    const map: Record<string, HeldKey> = {
-      KeyA: 'left',
-      ArrowLeft: 'left',
-      KeyD: 'right',
-      ArrowRight: 'right',
-      KeyS: 'down',
-      ArrowDown: 'down',
-      KeyW: 'jump',
-      ArrowUp: 'jump',
-      Space: 'jump',
-      KeyJ: 'throw',
-      KeyZ: 'throw',
-      KeyK: 'bump',
-      KeyX: 'bump',
-    };
     kb.addCapture('LEFT,RIGHT,UP,DOWN,SPACE');
     const onDown = (e: KeyboardEvent) => {
       const k = map[e.code];
@@ -69,25 +133,16 @@ export class HumanController implements Controller {
     });
   }
 
-  // 画面のボタン（左：移動、右：ジャンプ・まくら・ぽよん）
-  private setupTouch(scene: Phaser.Scene) {
-    scene.input.addPointer(3);
-    const H = GAME_HEIGHT;
-    const W = GAME_WIDTH;
-    const buttons: { key: HeldKey; x: number; y: number; r: number; label: string; color: number }[] = [
-      { key: 'left', x: 95, y: H - 105, r: 66, label: '◀', color: 0xffffff },
-      { key: 'right', x: 255, y: H - 105, r: 66, label: '▶', color: 0xffffff },
-      { key: 'down', x: 175, y: H - 225, r: 44, label: '▼', color: 0xffffff },
-      { key: 'jump', x: W - 100, y: H - 110, r: 74, label: 'ジャンプ', color: 0x7cd4ff },
-      { key: 'throw', x: W - 255, y: H - 85, r: 60, label: 'まくら', color: 0xffe08a },
-      { key: 'bump', x: W - 190, y: H - 240, r: 56, label: 'ぽよん', color: 0xffa0c8 },
-    ];
+  private setupTouch(scene: Phaser.Scene, buttons: ButtonDef[], tag?: { text: string; color: number }) {
+    scene.input.addPointer(5); // 2人×両手でも反応するように
     for (const b of buttons) {
-      const circle = scene.add.circle(b.x, b.y, b.r, b.color, 0.22).setStrokeStyle(4, b.color, 0.7).setDepth(50).setInteractive();
+      // ふたりのときは、ふちの色をキャラのテーマ色にして、どちらのボタンか分かるようにする
+      const edge = tag ? tag.color : b.color;
+      const circle = scene.add.circle(b.x, b.y, b.r, b.color, 0.22).setStrokeStyle(tag ? 6 : 4, edge, 0.8).setDepth(50).setInteractive();
       scene.add
         .text(b.x, b.y, b.label, {
           fontFamily: FONT,
-          fontSize: b.label.length > 1 ? '26px' : '44px',
+          fontSize: b.label.length > 1 ? `${Math.round(b.r * 0.38)}px` : `${Math.round(b.r * 0.66)}px`,
           fontStyle: 'bold',
           color: '#ffffff',
           stroke: '#000000',
@@ -111,6 +166,22 @@ export class HumanController implements Controller {
       };
       circle.on('pointerup', release);
       circle.on('pointerout', release);
+    }
+    if (tag) {
+      // 「1P」「2P」の札（▼ボタンの上。ステージにかからない場所）
+      const down = buttons.find((b) => b.key === 'down')!;
+      scene.add
+        .text(down.x, down.y - 72, tag.text, {
+          fontFamily: FONT,
+          fontSize: '30px',
+          fontStyle: 'bold',
+          color: '#ffffff',
+          backgroundColor: Phaser.Display.Color.IntegerToColor(tag.color).rgba,
+          padding: { x: 14, y: 4 },
+        })
+        .setOrigin(0.5)
+        .setAlpha(0.85)
+        .setDepth(51);
     }
   }
 }
